@@ -96,6 +96,10 @@ dbt_regions_sf <- world %>%
   summarise() %>%
   st_make_valid()
 
+dbt_regions_sf <- dbt_regions_sf %>%
+  st_make_valid() %>%
+  st_wrap_dateline(options = c("WRAPDATELINE=YES"))
+
 
 ###################  APP ######################
 custom_value_box <- function(title, value) {
@@ -251,7 +255,6 @@ ui <- fluidPage(
        
        ui <- fluidPage(
          
-         sidebarLayout(
            sidebarPanel(
              sliderInput(
                "year",
@@ -262,17 +265,9 @@ ui <- fluidPage(
                step = 1,
                sep = ""
              )
-             
            ),
            
-           mainPanel(
-             
-             leafletOutput("export_map", height = 700)
-             
-           )
-           
-         )
-         
+           leafletOutput("export_map", width = 700)
        )
 
        )
@@ -298,7 +293,7 @@ server <- function(input, output, session) {
   output$export_map <- renderLeaflet({
     
     leaflet(dbt_regions_sf) %>%
-      addProviderTiles("CartoDB.Positron")
+      addTiles()
     
   })
   
@@ -308,15 +303,16 @@ server <- function(input, output, session) {
     
     pal <- colorNumeric(
       palette = "YlOrRd",
-      domain = df$export_potential,
+      domain = log10(df$export_potential + 1),
       na.color = "#F0F0F0"
     )
+    
     
     leafletProxy("export_map", data = df) %>%
       clearShapes() %>%
       clearControls() %>%
       addPolygons(
-        fillColor = ~pal(export_potential),
+        fillColor = ~pal(log10(export_potential + 1)),
         fillOpacity = 0.8,
         color = "white",
         weight = 1,
