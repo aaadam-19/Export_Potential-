@@ -10,6 +10,7 @@ library(dplyr)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(scales)
+library(stringr)
 
 
 Exportp_2024 <- read_excel("UK Export potential - Fall 2024 (003).xlsx")%>%
@@ -20,17 +21,101 @@ Exportp_2025 <- read_excel("UK Export potential - Fall 2025.xlsx")%>%
 
 Combined_Exports <- rbind(Exportp_2024, Exportp_2025)
 
+Combined_Exports <- Combined_Exports %>%
+  mutate(HS2 = substr(`Product group code`, 1, 2),
+         HS4 = if_else(!str_detect(substr(`Product group code`, 1, 4), "X"),
+                       substr(`Product group code`, 1, 4),
+                       NA_character_),
+         HS6 = if_else(
+           !str_detect(substr(`Product group code`, 1, 6), "X"),
+           substr(`Product group code`, 1, 6),
+           NA_character_)
+         )%>%
+  rename(Export_potential = `Export potential ($ thousand)`,
+         Static_export_potential = `Static export potential ($ thousand)`,
+         Dynamic_export_potential = `Dynamic export potential ($ thousand)`,
+         Untapped_potential = `Untapped potential ($ thousand)`,
+         Static_untapped_potential = `Static untapped potential ($ thousand)`,
+         Dynamic_untapped_potential = `Dynamic untapped potential ($ thousand)`,
+         Actual_exports = `Actual exports ($ thousand)`)%>%
+  mutate(across(7:13, ~ . / 1000))%>%
+  mutate(Ratio = Untapped_potential/Export_potential)
+
+######### Exchange Rates and Trade Blocs #############
+
 USD_2024 <- (1.2783)
 USD_2025 <- (1.3185)
+
+eu_countries <- c(
+  "Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus",
+  "Czech Republic", "Denmark", "Estonia", "Finland", "France",
+  "Germany", "Greece", "Hungary", "Ireland", "Italy",
+  "Latvia", "Lithuania", "Luxembourg", "Malta", "Netherlands",
+  "Poland", "Portugal", "Romania", "Slovakia", "Slovenia",
+  "Spain", "Sweden"
+)
+
+CPTPP_countries <- c(
+  "Australia", "Brunei", "Canada", "Chile", "Japan",
+  "Malaysia", "Mexico", "New Zealand", "Peru",
+  "Singapore", "Vietnam"
+)
+
+GCC_countries <- c(
+  "Bahrain", "Kuwait", "Oman",
+  "Qatar", "Saudi Arabia", "United Arab Emirates"
+)
+
+MERCOSUR_countries <- c(
+  "Argentina", "Bolivia", "Brazil", "Paraguay", "Uruguay"
+)
+
+ASEAN_countries <- c(
+  "Brunei", "Cambodia", "Indonesia", "Laos",
+  "Malaysia", "Myanmar", "Philippines",
+  "Singapore", "Thailand", "Vietnam"
+)
+
+EFTA_countries <- c(
+  "Iceland", "Liechtenstein",
+  "Norway", "Switzerland"
+)
+
+USMCA_countries <- c(
+  "Canada", "Mexico", "United States"
+)
+
+RCEP_countries <- c(
+  "Australia", "Brunei", "Cambodia", "China",
+  "Indonesia", "Japan", "Laos", "Malaysia",
+  "Myanmar", "New Zealand", "Philippines",
+  "Singapore", "South Korea", "Thailand",
+  "Vietnam"
+)
+
+African_Continental_Free_Trade_Area <- c(
+  "Algeria", "Angola", "Benin", "Botswana", "Burkina Faso",
+  "Burundi", "Cameroon", "Cape Verde", "Central African Republic",
+  "Chad", "Comoros", "Congo", "Democratic Republic of the Congo",
+  "Djibouti", "Egypt", "Equatorial Guinea", "Eritrea",
+  "Eswatini", "Ethiopia", "Gabon", "Gambia", "Ghana",
+  "Guinea", "Guinea-Bissau", "Ivory Coast", "Kenya",
+  "Lesotho", "Liberia", "Libya", "Madagascar", "Malawi",
+  "Mali", "Mauritania", "Mauritius", "Morocco", "Mozambique",
+  "Namibia", "Niger", "Nigeria", "Rwanda",
+  "Sao Tome and Principe", "Senegal", "Seychelles",
+  "Sierra Leone", "Somalia", "South Africa", "South Sudan",
+  "Sudan", "Tanzania", "Togo", "Tunisia",
+  "Uganda", "Zambia", "Zimbabwe"
+)
 
 ############ Map Data  ##############
 
 Map_data <- Combined_Exports %>%
   group_by(Year, `Sub-region`) %>%
   summarise(
-    export_potential = sum(`Export potential ($ thousand)`, na.rm = TRUE),
-    .groups = "drop"
-  )
+    export_potential = sum(Export_potential, na.rm = TRUE),
+    .groups = "drop")
 
 world <- ne_countries(
   scale = "medium",
@@ -252,29 +337,58 @@ ui <- fluidPage(
           "Map of Export potential"),
        p(class = "section-description",
          "Insert descriptive text"),
-       
-       ui <- fluidPage(
          
-           sidebarPanel(
+       div(
+         style = "width: 300px; margin-bottom: 15px;",
+         
+         sliderInput(
+           "year",
+           "Year",
+           min = 2024,
+           max = 2025,
+           value = 2025,
+           step = 1,
+           sep = ""
+         )
+       ),
+           
+       leafletOutput("export_map" ,width = "100%" ,height = "700px"),
+       
+       br(),
+       
+       tabItem(
+         tabName = "trading_blocs",
+         
+         fluidRow(
+           box(
+             width = 3,
+             
              sliderInput(
-               "year",
+               "bloc_year",
                "Year",
-               min = 2024,
-               max = 2025,
-               value = 2024,
+               min = min(Combined_Exports$Year),
+               max = max(Combined_Exports$Year),
+               value = max(Combined_Exports$Year),
                step = 1,
                sep = ""
              )
-           ),
-           
-           leafletOutput("export_map", width = 700)
+           )
+         ),
+         
+         fluidRow(
+           box(
+             width = 12,
+             plotOutput("bloc_chart", height = "600px")
+           )
+         )
        )
-
-       )
+       ) #close div
   
 ) #close UI
 
 server <- function(input, output, session) {
+  
+  ############ MAP TAP ####################
   
   map_filtered <- reactive({
     Map_data %>%
@@ -293,7 +407,12 @@ server <- function(input, output, session) {
   output$export_map <- renderLeaflet({
     
     leaflet(dbt_regions_sf) %>%
-      addTiles()
+      addTiles()%>%
+      setView(
+        lng = 10,
+        lat = 40,
+        zoom = 2.2
+      )
     
   })
   
@@ -320,17 +439,83 @@ server <- function(input, output, session) {
           "<b>", DBT_Region, "</b><br>",
           "Export Potential: $",
           scales::comma(round(export_potential)),
-          " thousand"
+          " million"
         )
       ) %>%
       addLegend(
         position = "bottomright",
         pal = pal,
         values = ~export_potential,
-        title = "Export Potential ($000)"
+        title = "Export Potential ($m)"
       )
     
   })
+  
+  #############  BLOC ####################
+  
+  bloc_data <- reactive({
+    
+    Combined_Exports %>%
+      mutate(
+        Trading_Bloc = case_when(
+          Market %in% eu_countries ~ "EU",
+          Market %in% CPTPP_countries ~ "CPTPP",
+          Market %in% GCC_countries ~ "GCC",
+          Market %in% MERCOSUR_countries ~ "MERCOSUR",
+          Market %in% ASEAN_countries ~ "ASEAN",
+          Market %in% EFTA_countries ~ "EFTA",
+          Market %in% USMCA_countries ~ "USMCA",
+          Market %in% RCEP_countries ~ "RCEP",
+          Market %in% African_Continental_Free_Trade_Area ~ "AfCFTA",
+          TRUE ~ "Other"
+        )
+      ) %>%
+      filter(Year == input$bloc_year) %>%
+      group_by(Trading_Bloc) %>%
+      summarise(
+        Value = sum(Export_potential, na.rm = TRUE),
+        .groups = "drop"
+      )%>%
+      arrange(desc(Value))
+    
+  })
+  
+  group_colors <- c(
+    "EU" = "#12436D",
+    "GCC" = "#28A197",
+    "MERCOSUR" = "#801650",
+    "CPTPP" = "#F46A25",
+    "ASEAN" = "#3D3D3D",
+    "EFTA" = "#A285D1",
+    "USMCA" = "#2B8CC4",
+    "RCEP" = "#76B7B2",
+    "AfCFTA" = "#49B090",
+    "Other" = "#B1B4B6"
+  )
+  
+  
+  output$bloc_chart <- renderPlot({
+    
+    ggplot(bloc_data(),
+           aes(x = reorder(Trading_Bloc, -Value),
+               y = Value,
+               fill = Trading_Bloc))+
+      geom_col(width = 0.8) +
+      scale_fill_manual(values = group_colors)+
+      scale_y_continuous(labels = scales::comma) +
+      labs(
+        x = NULL,
+        y = "Export Potential ($m)",
+        fill = "Trading Bloc"
+      ) +
+      theme_minimal()+
+        theme(
+          legend.position = "none",
+          axis.text.x = element_text(angle = 45, hjust = 1)
+        )
+    
+  })
+  
   
 }
 
